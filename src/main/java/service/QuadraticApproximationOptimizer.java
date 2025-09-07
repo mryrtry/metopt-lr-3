@@ -5,181 +5,178 @@ import core.Function;
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.util.Arrays;
+import java.util.Comparator;
 
 public class QuadraticApproximationOptimizer {
 
     private static final MathContext MC = MathContext.DECIMAL128;
+    private static final BigDecimal HALF = new BigDecimal("0.5");
     private static final BigDecimal TWO = new BigDecimal("2");
     private static final BigDecimal ZERO = BigDecimal.ZERO;
 
-    public OptimizationResult findMinimum(Function function, BigDecimal a, BigDecimal b, BigDecimal epsilon1, BigDecimal epsilon2) {
-        validateInput(function, a, b, epsilon1, epsilon2);
+    public OptimizationResult findMinimum(Function function, BigDecimal initialX, BigDecimal deltaX,
+                                          BigDecimal epsilon1, BigDecimal epsilon2) {
 
-        BigDecimal x1 = a;
-        BigDecimal x3 = b;
-        BigDecimal x2 = a.add(b, MC).divide(TWO, MC);
+        validateInput(deltaX, epsilon1, epsilon2);
 
+        // Инициализация точек
+        BigDecimal x1 = initialX;
+        BigDecimal x2 = x1.add(deltaX, MC);
+        BigDecimal x3;
+
+        // Определяем направление для третьей точки
         BigDecimal f1 = function.calculateValue(x1);
         BigDecimal f2 = function.calculateValue(x2);
-        BigDecimal f3 = function.calculateValue(x3);
 
-        BigDecimal xMin = findBestX(x1, f1, x2, f2, x3, f3);
-        BigDecimal fMin = function.calculateValue(xMin);
+        if (f1.compareTo(f2) < 0) {
+            x3 = x1.subtract(deltaX, MC); // минимум слева
+        } else {
+            x3 = x1.add(deltaX.multiply(TWO, MC), MC); // минимум справа
+        }
 
-        int iteration = 0;
-        final int maxIterations = 100;
+        int iterations = 0;
+        final int maxIterations = 1000;
 
-        while (iteration < maxIterations) {
-            iteration++;
+        while (iterations < maxIterations) {
+            iterations++;
 
-            BigDecimal xBar = calculateXBar(x1, f1, x2, f2, x3, f3);
+            // Проверяем порядок точек
+            if (x2.subtract(x1, MC).multiply(x3.subtract(x2, MC), MC).compareTo(ZERO) < 0) {
+                x2 = x1.add(deltaX, MC);
+                f1 = function.calculateValue(x1);
+                f2 = function.calculateValue(x2);
 
-            if (xBar == null) {
-
-                System.out.println("Warning: Quadratic approximation failed (denominator zero). Returning current best estimate.");
-                break;
-            }
-
-            BigDecimal fBar;
-            try {
-                fBar = function.calculateValue(xBar);
-            } catch (Exception e) {
-
-                System.out.println("Warning: Candidate point x=" + xBar + " is outside function domain. Returning current best estimate.");
-                break;
-            }
-
-            BigDecimal absFMinMinusFBar = fMin.subtract(fBar, MC).abs();
-            BigDecimal relativeFChange = (fBar.compareTo(ZERO) != 0) ? absFMinMinusFBar.divide(fBar.abs(), MC) : absFMinMinusFBar;
-
-            BigDecimal absXMinMinusXBar = xMin.subtract(xBar, MC).abs();
-            BigDecimal relativeXChange = (xBar.compareTo(ZERO) != 0) ? absXMinMinusXBar.divide(xBar.abs(), MC) : absXMinMinusXBar;
-
-            boolean criteriaMet = (relativeFChange.compareTo(epsilon1) < 0) && (relativeXChange.compareTo(epsilon2) < 0);
-
-            if (criteriaMet) {
-                xMin = xBar;
-                fMin = fBar;
-                break;
-            }
-
-            BigDecimal bestXAmongAll = findBestX(x1, f1, x2, f2, x3, f3, xBar, fBar);
-            BigDecimal bestFAmongAll = function.calculateValue(bestXAmongAll);
-
-            BigDecimal[] allPoints = {x1, x2, x3, xBar};
-
-            Arrays.sort(allPoints);
-
-            int bestIndex = -1;
-            for (int i = 0; i < allPoints.length; i++) {
-                if (allPoints[i].compareTo(bestXAmongAll) == 0) {
-                    bestIndex = i;
-                    break;
+                if (f1.compareTo(f2) < 0) {
+                    x3 = x1.subtract(deltaX, MC);
+                } else {
+                    x3 = x1.add(deltaX.multiply(TWO, MC), MC);
                 }
             }
 
-            if (bestIndex == 0) {
-                x1 = allPoints[0];
-                x2 = allPoints[1];
-                x3 = allPoints[2];
-            } else if (bestIndex == allPoints.length - 1) {
+            BigDecimal f3 = function.calculateValue(x3);
 
-                x1 = allPoints[bestIndex - 2];
-                x2 = allPoints[bestIndex - 1];
-                x3 = allPoints[bestIndex];
+            // Находим минимальное значение и соответствующую точку
+            BigDecimal f0;
+            BigDecimal x0;
+
+            if (f1.compareTo(f2) <= 0 && f1.compareTo(f3) <= 0) {
+                f0 = f1;
+                x0 = x1;
+            } else if (f2.compareTo(f1) <= 0 && f2.compareTo(f3) <= 0) {
+                f0 = f2;
+                x0 = x2;
             } else {
-
-                x1 = allPoints[bestIndex - 1];
-                x2 = allPoints[bestIndex];
-                x3 = allPoints[bestIndex + 1];
+                f0 = f3;
+                x0 = x3;
             }
 
-            f1 = function.calculateValue(x1);
-            f2 = function.calculateValue(x2);
-            f3 = function.calculateValue(x3);
+            // Вычисляем x_min по формуле квадратичной аппроксимации
+            BigDecimal numerator = x2.subtract(x1, MC).pow(2)
+                    .multiply(f2.subtract(f3, MC), MC)
+                    .subtract(x2.subtract(x3, MC).pow(2)
+                            .multiply(f2.subtract(f1, MC), MC), MC);
 
-            xMin = bestXAmongAll;
-            fMin = bestFAmongAll;
+            BigDecimal denominator = x2.subtract(x1, MC)
+                    .multiply(f2.subtract(f3, MC), MC)
+                    .subtract(x2.subtract(x3, MC)
+                            .multiply(f2.subtract(f1, MC), MC), MC);
+
+            if (denominator.compareTo(ZERO) == 0) {
+                // Вырожденный случай - продолжаем с x2
+                x1 = x2;
+                x2 = x1.add(deltaX, MC);
+                continue;
+            }
+
+            BigDecimal xMin = x2.subtract(
+                    HALF.multiply(numerator, MC).divide(denominator, MC), MC
+            );
+
+            BigDecimal fMin = function.calculateValue(xMin);
+
+            // Проверяем условия завершения
+            BigDecimal relValueChange = calculateRelativeDifference(fMin, f0);
+            BigDecimal relPointChange = calculateRelativeDifference(xMin, x0);
+
+            if (relValueChange.compareTo(epsilon1) < 0 && relPointChange.compareTo(epsilon2) < 0) {
+                return new OptimizationResult(xMin, fMin, iterations);
+            }
+
+            // Находим границы интервала
+            BigDecimal leftDot = min(x1, x2, x3);
+            BigDecimal rightDot = max(x1, x2, x3);
+
+            // Создаем массив всех точек и сортируем
+            BigDecimal[] allPoints = {x1, x2, x3, xMin};
+            Arrays.sort(allPoints, Comparator.naturalOrder());
+
+            // Обновляем точки
+            if (xMin.compareTo(leftDot) >= 0 && xMin.compareTo(rightDot) <= 0) {
+                // xMin внутри интервала
+                if (fMin.compareTo(f0) < 0) {
+                    // Используем xMin и соседние точки
+                    int minIndex = findIndex(allPoints, xMin);
+                    x1 = allPoints[Math.max(0, minIndex - 1)];
+                    x2 = xMin;
+                    x3 = allPoints[Math.min(allPoints.length - 1, minIndex + 1)];
+                } else {
+                    // Используем x0 и соседние точки
+                    int zeroIndex = findIndex(allPoints, x0);
+                    x1 = allPoints[Math.max(0, zeroIndex - 1)];
+                    x2 = x0;
+                    x3 = allPoints[Math.min(allPoints.length - 1, zeroIndex + 1)];
+                }
+            } else {
+                // xMin вне интервала - начинаем с новой точки
+                x1 = xMin;
+                x2 = x1.add(deltaX, MC);
+
+                f1 = function.calculateValue(x1);
+                f2 = function.calculateValue(x2);
+
+                if (f1.compareTo(f2) < 0) {
+                    x3 = x1.subtract(deltaX, MC);
+                } else {
+                    x3 = x1.add(deltaX.multiply(TWO, MC), MC);
+                }
+            }
         }
 
-        if (iteration >= maxIterations) {
-            System.out.println("Warning: Reached maximum number of iterations (" + maxIterations + "). Result may not be fully converged.");
-        }
-
-        return new OptimizationResult(xMin, fMin, iteration);
+        throw new RuntimeException("Алгоритм не сошелся за " + maxIterations + " итераций");
     }
 
-    private BigDecimal calculateXBar(BigDecimal x1, BigDecimal f1, BigDecimal x2, BigDecimal f2, BigDecimal x3, BigDecimal f3) {
-
-        BigDecimal x1Sq = x1.multiply(x1, MC);
-        BigDecimal x2Sq = x2.multiply(x2, MC);
-        BigDecimal x3Sq = x3.multiply(x3, MC);
-
-        BigDecimal term1Num = x2Sq.subtract(x3Sq, MC).multiply(f1, MC);
-        BigDecimal term2Num = x3Sq.subtract(x1Sq, MC).multiply(f2, MC);
-        BigDecimal term3Num = x1Sq.subtract(x2Sq, MC).multiply(f3, MC);
-        BigDecimal numerator = term1Num.add(term2Num, MC).add(term3Num, MC);
-
-        BigDecimal term1Den = x2.subtract(x3, MC).multiply(f1, MC);
-        BigDecimal term2Den = x3.subtract(x1, MC).multiply(f2, MC);
-        BigDecimal term3Den = x1.subtract(x2, MC).multiply(f3, MC);
-        BigDecimal denominator = term1Den.add(term2Den, MC).add(term3Den, MC);
-
-        if (denominator.compareTo(ZERO) == 0) {
-            return null;
-        }
-
-        return numerator.divide(denominator, MC).multiply(new BigDecimal("0.5"), MC);
+    private BigDecimal min(BigDecimal a, BigDecimal b, BigDecimal c) {
+        return a.min(b).min(c);
     }
 
-    private BigDecimal findBestX(BigDecimal x1, BigDecimal f1, BigDecimal x2, BigDecimal f2, BigDecimal x3, BigDecimal f3) {
-
-        if (f1.compareTo(f2) <= 0 && f1.compareTo(f3) <= 0) {
-            return x1;
-        } else if (f2.compareTo(f1) <= 0 && f2.compareTo(f3) <= 0) {
-            return x2;
-        } else {
-            return x3;
-        }
+    private BigDecimal max(BigDecimal a, BigDecimal b, BigDecimal c) {
+        return a.max(b).max(c);
     }
 
-    private BigDecimal findBestX(BigDecimal x1, BigDecimal f1, BigDecimal x2, BigDecimal f2, BigDecimal x3, BigDecimal f3, BigDecimal x4, BigDecimal f4) {
-
-        BigDecimal bestX = x1;
-        BigDecimal bestF = f1;
-
-        if (f2.compareTo(bestF) < 0) {
-            bestX = x2;
-            bestF = f2;
+    private int findIndex(BigDecimal[] array, BigDecimal value) {
+        for (int i = 0; i < array.length; i++) {
+            if (array[i].compareTo(value) == 0) {
+                return i;
+            }
         }
-        if (f3.compareTo(bestF) < 0) {
-            bestX = x3;
-            bestF = f3;
-        }
-        if (f4.compareTo(bestF) < 0) {
-            bestX = x4;
-        }
-
-        return bestX;
+        return -1;
     }
 
-    private void validateInput(Function function, BigDecimal a, BigDecimal b, BigDecimal epsilon1, BigDecimal epsilon2) {
-        if (a.compareTo(b) >= 0) {
-            throw new IllegalArgumentException("Invalid interval: a must be less than b. a=" + a + ", b=" + b);
+    private BigDecimal calculateRelativeDifference(BigDecimal a, BigDecimal b) {
+        if (b.compareTo(ZERO) == 0) {
+            return a.abs(MC);
+        }
+        return a.subtract(b, MC).abs(MC).divide(b.abs(MC), MC);
+    }
+
+    private void validateInput(BigDecimal deltaX, BigDecimal epsilon1, BigDecimal epsilon2) {
+        if (deltaX.compareTo(ZERO) <= 0) {
+            throw new IllegalArgumentException("Шаг должен быть положительным");
         }
         if (epsilon1.compareTo(ZERO) <= 0 || epsilon2.compareTo(ZERO) <= 0) {
-            throw new IllegalArgumentException("Epsilon values must be positive. epsilon1=" + epsilon1 + ", epsilon2=" + epsilon2);
-        }
-
-        try {
-            function.calculateValue(a);
-            function.calculateValue(b);
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Function cannot be evaluated at the interval boundaries. " + e.getMessage(), e);
+            throw new IllegalArgumentException("Точности должны быть положительными");
         }
     }
 
-    public record OptimizationResult(BigDecimal xMin, BigDecimal fMin, int iterations) {
-    }
-
+    public record OptimizationResult(BigDecimal xMin, BigDecimal fMin, int iterations) {}
 }
